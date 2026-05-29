@@ -2,8 +2,8 @@
 ntfy_topic = "your-topic-here"
 # ntfy_topic_file = "/run/secrets/ntfy_topic"  # read topic from a file (e.g. for secrets)
 
-log_file = "/var/log/sitemon.log"
-state_file = "/var/lib/sitemon/state.json"
+log_file = "/var/log/nudnik.log"
+state_file = "/var/lib/nudnik/state.json"
 
 # Minimum seconds between repeated alerts for the same down site
 alert_interval_seconds = 3600
