@@ -1,0 +1,29 @@
+# ntfy.sh topic — use one of these two options:
+ntfy_topic = "your-topic-here"
+# ntfy_topic_file = "/run/secrets/ntfy_topic"  # read topic from a file (e.g. for secrets)
+
+log_file = "/var/log/sitemon.log"
+state_file = "/var/lib/sitemon/state.json"
+
+# Minimum seconds between repeated alerts for the same down site
+alert_interval_seconds = 3600
+
+# Per-request timeout in seconds
+request_timeout_seconds = 10
+
+[[sites]]
+name = "My App"
+url = "https://example.com/health"
+keyword = "ok"
+
+[[sites]]
+name = "My Blog"
+url = "https://myblog.com"
+keyword = "Welcome"
+
+[[sites]]
+name = "Private Dashboard"
+url = "https://internal.example.com/health"
+keyword = "ok"
+username = "monitor"
+password = "secret"
