@@ -42,24 +42,28 @@ def check_site(url, keyword, timeout, username=None, password=None, user_agent=D
         req.add_header("Authorization", f"Basic {token}")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            logging.debug(f"{url} -> HTTP {resp.status}")
-            logging.debug("headers:\n" + "\n".join(f"  {k}: {v}" for k, v in resp.headers.items()))
-            if not (200 <= resp.status < 300):
-                return False, f"HTTP {resp.status}"
+            status = resp.status
+            headers = resp.headers
             body = resp.read().decode("utf-8", errors="replace")
+            if not (200 <= status < 300):
+                logging.warning(f"{url} -> HTTP {status}")
+                logging.warning("headers:\n" + "\n".join(f"  {k}: {v}" for k, v in headers.items()))
+                return False, f"HTTP {status}"
             if keyword and keyword.lower() not in body.lower():
-                logging.debug(f"body (first 500 chars): {body[:500]}")
+                logging.warning(f"{url} -> HTTP {status}, keyword '{keyword}' not found")
+                logging.warning("headers:\n" + "\n".join(f"  {k}: {v}" for k, v in headers.items()))
+                logging.warning(f"body (first 500 chars): {body[:500]}")
                 return False, f"keyword '{keyword}' not found"
             return True, "ok"
     except urllib.error.HTTPError as e:
-        logging.debug(f"{url} -> HTTP {e.code}: {e.reason}")
-        logging.debug("headers:\n" + "\n".join(f"  {k}: {v}" for k, v in e.headers.items()))
+        logging.warning(f"{url} -> HTTP {e.code}: {e.reason}")
+        logging.warning("headers:\n" + "\n".join(f"  {k}: {v}" for k, v in e.headers.items()))
         return False, f"HTTP {e.code}"
     except urllib.error.URLError as e:
-        logging.debug(f"{url} -> URLError: {e.reason}")
+        logging.warning(f"{url} -> URLError: {e.reason}")
         return False, str(e.reason)
     except Exception as e:
-        logging.debug(f"{url} -> {type(e).__name__}: {e}", exc_info=True)
+        logging.warning(f"{url} -> {type(e).__name__}: {e}", exc_info=True)
         return False, str(e)
 
 
@@ -158,7 +162,7 @@ def main():
         prev_status = site_state["status"]
 
         if up:
-            logging.info(f"{name}: up")
+            logging.debug(f"{name}: up")
             if prev_status == "down":
                 down_since = site_state.get("down_since") or now
                 msg = f"{name} recovered (was down for {fmt_duration(now - down_since)}).\n{url}"
