@@ -63,6 +63,28 @@ def check_site(url, keyword, timeout, username=None, password=None, user_agent=D
         return False, str(e)
 
 
+def topic_has_recent_alert(topic, site_name, since_seconds):
+    """Return True if another instance already sent a down-alert for site_name recently."""
+    url = f"https://ntfy.sh/{topic}/json?poll=1&since={int(since_seconds)}s"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            for line in resp:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if msg.get("event") != "message":
+                    continue
+                if msg.get("title") == f"{site_name} is down":
+                    return True
+    except Exception as e:
+        logging.debug(f"Could not poll topic for remote state: {e}")
+    return False
+
+
 def notify(topic, title, message, priority="default", tags=None):
     headers = {"Title": title, "Priority": priority}
     if tags:
@@ -153,9 +175,13 @@ def main():
                 down_since = site_state.get("down_since") or now
                 duration = fmt_duration(now - down_since)
                 msg = f"{name} is unreachable ({reason}).\nDown for: {duration}\n{url}"
-                notify(ntfy_topic, f"{name} is down", msg, priority="high", tags=["rotating_light"])
-                site_state["last_alert"] = now
-                logging.warning(f"{name}: alert sent")
+                if topic_has_recent_alert(ntfy_topic, name, alert_interval):
+                    site_state["last_alert"] = now
+                    logging.info(f"{name}: alert suppressed (another instance already notified)")
+                else:
+                    notify(ntfy_topic, f"{name} is down", msg, priority="high", tags=["rotating_light"])
+                    site_state["last_alert"] = now
+                    logging.warning(f"{name}: alert sent")
 
     save_state(state_file, state)
 
