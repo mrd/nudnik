@@ -73,6 +73,88 @@ def test_load_config_missing_include_warns_and_skips(tmp_path, caplog):
     assert config["ntfy_topic"] == "t"
     assert "missing.toml" in caplog.text
 
+def test_load_config_includedir_loads_sorted_toml_files(tmp_path):
+    d = tmp_path / "conf.d"
+    d.mkdir()
+    (d / "b.toml").write_text('[[sites]]\nname = "B"\nurl = "http://b.com"\n')
+    (d / "a.toml").write_text('[[sites]]\nname = "A"\nurl = "http://a.com"\n')
+    main = tmp_path / "main.toml"
+    main.write_text('includedir = "conf.d"\nntfy_topic = "t"\n')
+    config = nudnik.load_config(main)
+    names = [s["name"] for s in config["sites"]]
+    assert names == ["A", "B"]
+
+def test_load_config_includedir_string_and_list_forms(tmp_path):
+    d = tmp_path / "extras"
+    d.mkdir()
+    (d / "x.toml").write_text('ntfy_topic = "from-dir"\n')
+    main = tmp_path / "main.toml"
+    main.write_text('includedir = ["extras"]\nstate_file = "s"\n')
+    config = nudnik.load_config(main)
+    assert config["ntfy_topic"] == "from-dir"
+
+def test_load_config_includedir_main_overrides(tmp_path):
+    d = tmp_path / "conf.d"
+    d.mkdir()
+    (d / "a.toml").write_text('ntfy_topic = "from-dir"\n')
+    main = tmp_path / "main.toml"
+    main.write_text('includedir = "conf.d"\nntfy_topic = "main"\n')
+    config = nudnik.load_config(main)
+    assert config["ntfy_topic"] == "main"
+
+def test_load_config_directory_path_loads_sorted_toml_files(tmp_path):
+    (tmp_path / "b.toml").write_text('[[sites]]\nname = "B"\nurl = "http://b.com"\n')
+    (tmp_path / "a.toml").write_text('ntfy_topic = "t"\n[[sites]]\nname = "A"\nurl = "http://a.com"\n')
+    config = nudnik.load_config(tmp_path)
+    assert config["ntfy_topic"] == "t"
+    names = [s["name"] for s in config["sites"]]
+    assert names == ["A", "B"]
+
+def test_load_config_directory_later_file_overrides_earlier(tmp_path):
+    (tmp_path / "a.toml").write_text('ntfy_topic = "first"\n')
+    (tmp_path / "b.toml").write_text('ntfy_topic = "second"\n')
+    config = nudnik.load_config(tmp_path)
+    assert config["ntfy_topic"] == "second"
+
+
+# ---------------------------------------------------------------------------
+# load_configs (multi-path CLI merge)
+# ---------------------------------------------------------------------------
+
+def test_load_configs_merges_multiple_files(tmp_path):
+    a = tmp_path / "a.toml"
+    b = tmp_path / "b.toml"
+    a.write_text('ntfy_topic = "a"\n[[sites]]\nname = "A"\nurl = "http://a.com"\n')
+    b.write_text('state_file = "s"\n[[sites]]\nname = "B"\nurl = "http://b.com"\n')
+    config = nudnik.load_configs([a, b])
+    assert config["ntfy_topic"] == "a"
+    assert config["state_file"] == "s"
+    assert [s["name"] for s in config["sites"]] == ["A", "B"]
+
+def test_load_configs_later_arg_overrides_earlier(tmp_path):
+    a = tmp_path / "a.toml"
+    b = tmp_path / "b.toml"
+    a.write_text('ntfy_topic = "first"\n')
+    b.write_text('ntfy_topic = "second"\n')
+    config = nudnik.load_configs([a, b])
+    assert config["ntfy_topic"] == "second"
+
+def test_load_configs_deduplicates_repeated_path(tmp_path):
+    a = tmp_path / "a.toml"
+    a.write_text('[[sites]]\nname = "A"\nurl = "http://a.com"\n')
+    config = nudnik.load_configs([a, a])
+    assert len(config["sites"]) == 1
+
+def test_load_configs_file_and_dir(tmp_path):
+    base = tmp_path / "base.toml"
+    base.write_text('ntfy_topic = "base"\n')
+    d = tmp_path / "conf.d"
+    d.mkdir()
+    (d / "extra.toml").write_text('state_file = "s"\n')
+    config = nudnik.load_configs([base, d])
+    assert config["ntfy_topic"] == "base"
+    assert config["state_file"] == "s"
+
 
 # ---------------------------------------------------------------------------
 # fmt_duration

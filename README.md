@@ -93,6 +93,27 @@ Included files are merged in order before the main file, so the main file's valu
 
 Includes can be nested — an included file can itself include others. Circular references are silently ignored. Missing included files produce a warning and are skipped.
 
+Use `includedir` to load every `*.toml` file from a directory (sorted alphabetically), which is handy for a `conf.d`-style layout:
+
+```toml
+includedir = "conf.d"
+```
+
+Both `include` and `includedir` accept either a string (single path) or a list. `include` files are processed first, then `includedir` files, then the main file wins.
+
+You can also pass multiple files and/or directories on the command line — nudnik merges them in the order given, with later arguments winning for scalar settings and `[[sites]]` entries concatenated. Duplicate paths are silently skipped.
+
+```sh
+python3 nudnik.py base.toml overrides.toml
+python3 nudnik.py /etc/nudnik/conf.d/ local.toml
+```
+
+Passing a single directory works too:
+
+```sh
+python3 nudnik.py /etc/nudnik/conf.d/
+```
+
 A common pattern is a shared base config for settings like `ntfy_topic` and `alert_interval_seconds`, included by several per-deployment configs that each add their own sites:
 
 ```toml

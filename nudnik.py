@@ -36,12 +36,29 @@ def load_config(path, _seen=None):
         return {}
     _seen.add(path)
 
+    if path.is_dir():
+        base = {}
+        for toml_file in sorted(path.glob("*.toml")):
+            for k, v in load_config(toml_file, _seen).items():
+                if k == "sites":
+                    base.setdefault("sites", []).extend(v)
+                else:
+                    base[k] = v
+        return base
+
     with open(path, "rb") as f:
         config = tomllib.load(f)
 
     includes = config.pop("include", [])
     if isinstance(includes, str):
         includes = [includes]
+
+    include_dirs = config.pop("includedir", [])
+    if isinstance(include_dirs, str):
+        include_dirs = [include_dirs]
+    for d in include_dirs:
+        dir_path = Path(d) if Path(d).is_absolute() else path.parent / d
+        includes += sorted(str(p) for p in dir_path.glob("*.toml"))
 
     base = {}
     for inc in includes:
@@ -63,6 +80,18 @@ def load_config(path, _seen=None):
         else:
             base[k] = v
 
+    return base
+
+
+def load_configs(paths):
+    seen = set()
+    base = {}
+    for path in paths:
+        for k, v in load_config(path, seen).items():
+            if k == "sites":
+                base.setdefault("sites", []).extend(v)
+            else:
+                base[k] = v
     return base
 
 
@@ -266,9 +295,10 @@ def fmt_duration(seconds):
     return f"{seconds // 60}m {seconds % 60}s"
 
 
-def check_config(config_path):
-    config_dir = Path(config_path).resolve().parent
-    config = load_config(config_path)
+def check_config(config_paths):
+    p = Path(config_paths[0]).resolve()
+    config_dir = p if p.is_dir() else p.parent
+    config = load_configs(config_paths)
 
     lines = []
 
@@ -356,7 +386,7 @@ def check_config(config_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Website uptime monitor")
-    parser.add_argument("config", help="Path to TOML config file")
+    parser.add_argument("config", nargs="+", help="Path(s) to TOML config file(s) or director(ies); merged in order, duplicates skipped")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show debug output including response headers and body excerpts")
     parser.add_argument("--check", action="store_true", help="Validate config and print resolved settings, then exit")
     parser.add_argument("--dry-run", action="store_true", help="Run all checks but skip notifications and state saves")
@@ -366,8 +396,9 @@ def main():
         check_config(args.config)
         sys.exit(0)
 
-    config_dir = Path(args.config).resolve().parent
-    config = load_config(args.config)
+    _config_path = Path(args.config[0]).resolve()
+    config_dir = _config_path if _config_path.is_dir() else _config_path.parent
+    config = load_configs(args.config)
 
     log_file = config.get("log_file")
     handlers = [logging.StreamHandler()]
