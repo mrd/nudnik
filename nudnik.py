@@ -239,11 +239,96 @@ def fmt_duration(seconds):
     return f"{seconds // 60}m {seconds % 60}s"
 
 
+def check_config(config_path):
+    config_dir = Path(config_path).resolve().parent
+    config = load_config(config_path)
+
+    lines = []
+
+    if "ntfy_topic" in config:
+        lines.append(f"ntfy_topic:       {config['ntfy_topic']}")
+    elif "ntfy_topic_file" in config:
+        topic_file = config["ntfy_topic_file"]
+        try:
+            topic = Path(topic_file).read_text().strip()
+            lines.append(f"ntfy_topic:       {topic} (from {topic_file})")
+        except FileNotFoundError:
+            lines.append(f"ntfy_topic:       ERROR: file not found: {topic_file}")
+    else:
+        lines.append("ntfy_topic:       ERROR: not set (need 'ntfy_topic' or 'ntfy_topic_file')")
+
+    lines.append(f"node_name:        {config.get('node_name', socket.gethostname() + ' (hostname)')}")
+    lines.append(f"state_file:       {config.get('state_file', '(not set)')}")
+    lines.append(f"log_file:         {config.get('log_file', '(not set)')}")
+    lines.append(f"alert_interval:   {config.get('alert_interval_seconds', 3600)}s")
+    lines.append(f"request_timeout:  {config.get('request_timeout_seconds', 10)}s")
+    r = min(config.get("retries", 2), 5)
+    t = config.get("request_timeout_seconds", 10)
+    worst = (r + 1) * t + sum(2 ** i for i in range(r))
+    lines.append(f"retries:          {r} (max 5, worst-case detection time: {worst}s)")
+
+    global_quiet = config.get("quiet_hours")
+    if global_quiet:
+        lines.append(f"quiet_hours:      {global_quiet['start']} – {global_quiet['end']}")
+        if "quiet_days" in global_quiet:
+            lines.append("                  WARNING: quiet_days is nested inside [quiet_hours] — move it before the [quiet_hours] section")
+    global_quiet_days = config.get("quiet_days")
+    if global_quiet_days:
+        bad = [d for d in global_quiet_days if d.lower() not in _DAY_NAMES]
+        suffix = f"  ERROR: unknown day(s): {', '.join(bad)}" if bad else ""
+        lines.append(f"quiet_days:       {', '.join(global_quiet_days)}{suffix}")
+    global_tz = config.get("timezone")
+    if global_tz:
+        lines.append(f"timezone:         {global_tz}")
+
+    sites = config.get("sites", [])
+    lines.append(f"\nsites ({len(sites)}):")
+    global_retries = min(config.get("retries", 2), 5)
+    for site in sites:
+        url = site["url"]
+        name = site.get("name", url)
+        lines.append(f"\n  [{name}]")
+        lines.append(f"    url:      {url}")
+        if site.get("keyword"):
+            lines.append(f"    keyword:  {site['keyword']}")
+        if "auth_file" in site:
+            auth_path = Path(site["auth_file"])
+            if not auth_path.is_absolute() and not auth_path.exists():
+                auth_path = config_dir / auth_path
+            if auth_path.exists():
+                lines.append(f"    auth:     from {auth_path}")
+            else:
+                lines.append(f"    auth:     ERROR: file not found: {auth_path}")
+        elif site.get("username"):
+            lines.append(f"    auth:     username={site['username']}")
+        tz = site.get("timezone", global_tz)
+        if tz:
+            lines.append(f"    timezone: {tz}")
+        site_quiet = site.get("quiet_hours", global_quiet)
+        if site_quiet:
+            lines.append(f"    quiet_hours: {site_quiet['start']} – {site_quiet['end']}")
+        site_quiet_days = site.get("quiet_days", global_quiet_days)
+        if site_quiet_days:
+            bad = [d for d in site_quiet_days if d.lower() not in _DAY_NAMES]
+            suffix = f"  ERROR: unknown day(s): {', '.join(bad)}" if bad else ""
+            lines.append(f"    quiet_days:  {', '.join(site_quiet_days)}{suffix}")
+        retries = min(site.get("retries", global_retries), 5)
+        if retries != min(config.get("retries", 2), 5):
+            lines.append(f"    retries:  {retries}")
+
+    print("\n".join(lines))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Website uptime monitor")
     parser.add_argument("config", help="Path to TOML config file")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show debug output including response headers and body excerpts")
+    parser.add_argument("--check", action="store_true", help="Validate config and print resolved settings, then exit")
     args = parser.parse_args()
+
+    if args.check:
+        check_config(args.config)
+        sys.exit(0)
 
     config_dir = Path(args.config).resolve().parent
     config = load_config(args.config)
