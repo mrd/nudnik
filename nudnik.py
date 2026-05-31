@@ -125,10 +125,10 @@ def resolve_timezone(tz_name):
         return None
 
 
-def in_quiet_hours(quiet_hours, tz):
+def in_quiet_hours(quiet_hours, tz, _now=None):
     start = datetime.time(*map(int, quiet_hours["start"].split(":")))
     end = datetime.time(*map(int, quiet_hours["end"].split(":")))
-    now = datetime.datetime.now(tz).time().replace(second=0, microsecond=0)
+    now = (_now or datetime.datetime.now(tz)).time().replace(second=0, microsecond=0)
     if start <= end:
         return start <= now <= end
     return now >= start or now <= end  # overnight window e.g. 23:00–07:00
@@ -145,8 +145,8 @@ _DAY_NAMES = {
 }
 
 
-def in_quiet_days(quiet_days, tz):
-    today = datetime.datetime.now(tz).weekday()
+def in_quiet_days(quiet_days, tz, _now=None):
+    today = (_now or datetime.datetime.now(tz)).weekday()
     return today in {_DAY_NAMES[d.lower()] for d in quiet_days}
 
 
