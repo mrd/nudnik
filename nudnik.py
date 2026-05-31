@@ -207,6 +207,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Show debug output including response headers and body excerpts")
     args = parser.parse_args()
 
+    config_dir = Path(args.config).parent
     with open(args.config, "rb") as f:
         config = tomllib.load(f)
 
@@ -254,7 +255,10 @@ def main():
         username = site.get("username")
         password = site.get("password")
         if "auth_file" in site:
-            creds = Path(site["auth_file"]).read_text().strip()
+            auth_path = Path(site["auth_file"])
+            if not auth_path.is_absolute() and not auth_path.exists():
+                auth_path = config_dir / auth_path
+            creds = auth_path.read_text().strip()
             username, _, password = creds.partition(":")
 
         user_agent = site.get("user_agent", default_ua)
