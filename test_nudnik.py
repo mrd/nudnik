@@ -10,6 +10,62 @@ import nudnik
 
 
 # ---------------------------------------------------------------------------
+# load_config / include
+# ---------------------------------------------------------------------------
+
+def test_load_config_no_includes(tmp_path):
+    cfg = tmp_path / "nudnik.toml"
+    cfg.write_text('ntfy_topic = "t"\n[[sites]]\nname = "A"\nurl = "http://a.com"\n')
+    config = nudnik.load_config(cfg)
+    assert config["ntfy_topic"] == "t"
+    assert len(config["sites"]) == 1
+
+def test_load_config_include_merges_sites(tmp_path):
+    base = tmp_path / "base.toml"
+    base.write_text('[[sites]]\nname = "Base"\nurl = "http://base.com"\n')
+    main = tmp_path / "main.toml"
+    main.write_text('include = ["base.toml"]\nntfy_topic = "t"\n[[sites]]\nname = "Main"\nurl = "http://main.com"\n')
+    config = nudnik.load_config(main)
+    names = [s["name"] for s in config["sites"]]
+    assert names == ["Base", "Main"]
+
+def test_load_config_main_overrides_included_keys(tmp_path):
+    base = tmp_path / "base.toml"
+    base.write_text('alert_interval_seconds = 1800\nntfy_topic = "base-topic"\n')
+    main = tmp_path / "main.toml"
+    main.write_text('include = ["base.toml"]\nntfy_topic = "main-topic"\n')
+    config = nudnik.load_config(main)
+    assert config["ntfy_topic"] == "main-topic"
+    assert config["alert_interval_seconds"] == 1800
+
+def test_load_config_include_relative_to_config_dir(tmp_path):
+    subdir = tmp_path / "sub"
+    subdir.mkdir()
+    base = subdir / "base.toml"
+    base.write_text('ntfy_topic = "from-base"\n')
+    main = subdir / "main.toml"
+    main.write_text('include = ["base.toml"]\nstate_file = "s"\n')
+    config = nudnik.load_config(main)
+    assert config["ntfy_topic"] == "from-base"
+
+def test_load_config_cycle_detection(tmp_path):
+    a = tmp_path / "a.toml"
+    b = tmp_path / "b.toml"
+    a.write_text('include = ["b.toml"]\nntfy_topic = "a"\n')
+    b.write_text('include = ["a.toml"]\nntfy_topic = "b"\n')
+    config = nudnik.load_config(a)
+    assert config["ntfy_topic"] == "a"
+
+def test_load_config_include_string_form(tmp_path):
+    base = tmp_path / "base.toml"
+    base.write_text('ntfy_topic = "t"\n')
+    main = tmp_path / "main.toml"
+    main.write_text('include = "base.toml"\nstate_file = "s"\n')
+    config = nudnik.load_config(main)
+    assert config["ntfy_topic"] == "t"
+
+
+# ---------------------------------------------------------------------------
 # fmt_duration
 # ---------------------------------------------------------------------------
 

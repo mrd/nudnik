@@ -27,6 +27,40 @@ except ImportError:
     HAS_ZONEINFO = False
 
 
+def load_config(path, _seen=None):
+    if _seen is None:
+        _seen = set()
+    path = Path(path).resolve()
+    if path in _seen:
+        return {}
+    _seen.add(path)
+
+    with open(path, "rb") as f:
+        config = tomllib.load(f)
+
+    includes = config.pop("include", [])
+    if isinstance(includes, str):
+        includes = [includes]
+
+    base = {}
+    for inc in includes:
+        inc_path = Path(inc) if Path(inc).is_absolute() else path.parent / inc
+        inc_config = load_config(inc_path, _seen)
+        for k, v in inc_config.items():
+            if k == "sites":
+                base.setdefault("sites", []).extend(v)
+            else:
+                base[k] = v
+
+    for k, v in config.items():
+        if k == "sites":
+            base["sites"] = base.get("sites", []) + v
+        else:
+            base[k] = v
+
+    return base
+
+
 def load_state(path):
     try:
         return json.loads(Path(path).read_text())
@@ -207,9 +241,8 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Show debug output including response headers and body excerpts")
     args = parser.parse_args()
 
-    config_dir = Path(args.config).parent
-    with open(args.config, "rb") as f:
-        config = tomllib.load(f)
+    config_dir = Path(args.config).resolve().parent
+    config = load_config(args.config)
 
     log_file = config.get("log_file")
     handlers = [logging.StreamHandler()]
