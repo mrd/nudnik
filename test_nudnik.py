@@ -208,6 +208,65 @@ def test_topic_has_recent_alert_network_error():
 
 
 # ---------------------------------------------------------------------------
+# sync_state_from_topic
+# ---------------------------------------------------------------------------
+
+NOW = 1000000.0
+
+def test_sync_sets_down_state_from_remote_alert():
+    msg = {"event": "message", "time": int(NOW) - 60, "title": "mysite is down",
+           "message": "mysite is unreachable\nReported by: node-b"}
+    state = {}
+    with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
+        nudnik.sync_state_from_topic("topic", ["mysite"], 3600, "node-a", state, NOW)
+    assert state["mysite"]["status"] == "down"
+    assert state["mysite"]["last_alert_node"] == "node-b"
+    assert state["mysite"]["down_since"] == int(NOW) - 60
+
+def test_sync_sets_up_state_from_remote_recovery():
+    msg = {"event": "message", "time": int(NOW) - 30, "title": "mysite is back up",
+           "message": "mysite recovered\nReported by: node-b"}
+    state = {"mysite": {"status": "down", "last_alert": NOW - 100, "down_since": NOW - 200}}
+    with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
+        nudnik.sync_state_from_topic("topic", ["mysite"], 3600, "node-a", state, NOW)
+    assert state["mysite"]["status"] == "up"
+    assert state["mysite"]["down_since"] is None
+
+def test_sync_skips_own_node_messages():
+    msg = {"event": "message", "time": int(NOW) - 60, "title": "mysite is down",
+           "message": "mysite is unreachable\nReported by: node-a"}
+    state = {}
+    with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
+        nudnik.sync_state_from_topic("topic", ["mysite"], 3600, "node-a", state, NOW)
+    assert "mysite" not in state
+
+def test_sync_does_not_overwrite_existing_down_since():
+    msg = {"event": "message", "time": int(NOW) - 60, "title": "mysite is down",
+           "message": "mysite is unreachable\nReported by: node-b"}
+    state = {"mysite": {"status": "down", "last_alert": NOW - 100,
+                        "down_since": NOW - 500, "last_alert_node": "node-b"}}
+    with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
+        nudnik.sync_state_from_topic("topic", ["mysite"], 3600, "node-a", state, NOW)
+    assert state["mysite"]["down_since"] == NOW - 500
+
+def test_sync_updates_last_alert_from_newer_message():
+    msg = {"event": "message", "time": int(NOW) - 10, "title": "mysite is down",
+           "message": "mysite is unreachable\nReported by: node-b"}
+    state = {"mysite": {"status": "down", "last_alert": NOW - 100,
+                        "down_since": NOW - 200, "last_alert_node": "node-c"}}
+    with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
+        nudnik.sync_state_from_topic("topic", ["mysite"], 3600, "node-a", state, NOW)
+    assert state["mysite"]["last_alert"] == int(NOW) - 10
+    assert state["mysite"]["last_alert_node"] == "node-b"
+
+def test_sync_network_error_leaves_state_unchanged():
+    state = {}
+    with patch("urllib.request.urlopen", side_effect=Exception("timeout")):
+        nudnik.sync_state_from_topic("topic", ["mysite"], 3600, "node-a", state, NOW)
+    assert state == {}
+
+
+# ---------------------------------------------------------------------------
 # main — integration
 # ---------------------------------------------------------------------------
 
@@ -247,6 +306,7 @@ def _run_main(config, state, monkeypatch, tmp_path,
 
     result = {"up": site_up, "reason": "ok" if site_up else "timeout"}
     monkeypatch.setattr("nudnik.check_site", lambda *a, **kw: (result["up"], result["reason"]))
+    monkeypatch.setattr("nudnik.sync_state_from_topic", lambda *a, **kw: None)
     monkeypatch.setattr("nudnik.topic_has_recent_alert", lambda *a, **kw: "remote-node" if has_remote_alert else None)
     notifications = []
     monkeypatch.setattr("nudnik.notify", lambda *a, **kw: notifications.append((a, kw)))

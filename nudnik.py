@@ -75,36 +75,69 @@ def check_site(url, keyword, timeout, username=None, password=None, user_agent=D
         return False, str(e)
 
 
-def topic_has_recent_alert(topic, site_name, since_seconds, node_name=None):
-    """Return the reporting node name if a different node sent a down-alert for site_name recently, else None."""
+def _parse_reporter(body):
+    for part in body.splitlines():
+        if part.startswith("Reported by: "):
+            return part[len("Reported by: "):]
+    return "unknown"
+
+
+def _poll_topic(topic, since_seconds):
+    """Yield parsed ntfy message dicts for the topic over the given window."""
     url = f"https://ntfy.sh/{topic}/json?poll=1&since={int(since_seconds)}s"
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:
-            for line in resp:
-                line = line.strip()
-                if not line:
+            for raw in resp:
+                raw = raw.strip()
+                if not raw:
                     continue
                 try:
-                    msg = json.loads(line)
+                    msg = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-                if msg.get("event") != "message":
-                    continue
-                if msg.get("title") != f"{site_name} is down":
-                    continue
-                body = msg.get("message", "")
-                for line in body.splitlines():
-                    if line.startswith("Reported by: "):
-                        reporter = line[len("Reported by: "):]
-                        break
-                else:
-                    reporter = "unknown"
-                if node_name and reporter == node_name:
-                    continue
-                return reporter
+                if msg.get("event") == "message":
+                    yield msg
     except Exception as e:
-        logging.debug(f"Could not poll topic for remote state: {e}")
+        logging.debug(f"Could not poll ntfy topic: {e}")
+
+
+def topic_has_recent_alert(topic, site_name, since_seconds, node_name=None):
+    """Return the reporting node name if a different node sent a down-alert for site_name recently, else None."""
+    for msg in _poll_topic(topic, since_seconds):
+        if msg.get("title") != f"{site_name} is down":
+            continue
+        reporter = _parse_reporter(msg.get("message", ""))
+        if node_name and reporter == node_name:
+            continue
+        return reporter
     return None
+
+
+def sync_state_from_topic(topic, site_names, since_seconds, node_name, state, now):
+    """Update local state from remote alerts so we reflect what other nodes have observed."""
+    for msg in _poll_topic(topic, since_seconds):
+        title = msg.get("title", "")
+        reporter = _parse_reporter(msg.get("message", ""))
+        if reporter == node_name:
+            continue
+        msg_time = msg.get("time", now)
+        for name in site_names:
+            if title == f"{name} is down":
+                site_state = state.setdefault(name, {"status": None, "last_alert": 0, "down_since": None})
+                if site_state.get("status") != "down":
+                    site_state["status"] = "down"
+                    if site_state.get("down_since") is None:
+                        site_state["down_since"] = msg_time
+                    logging.info(f"{name}: state updated to down (reported by {reporter})")
+                if msg_time > site_state.get("last_alert", 0):
+                    site_state["last_alert"] = msg_time
+                    site_state["last_alert_node"] = reporter
+            elif title == f"{name} is back up":
+                site_state = state.setdefault(name, {"status": None, "last_alert": 0, "down_since": None})
+                if site_state.get("status") != "up":
+                    site_state["status"] = "up"
+                    site_state["down_since"] = None
+                    logging.info(f"{name}: state updated to up (reported by {reporter})")
 
 
 def notify(topic, title, message, priority="default", tags=None):
@@ -208,6 +241,9 @@ def main():
 
     state = load_state(state_file)
     now = time.time()
+
+    site_names = [s.get("name", s["url"]) for s in sites]
+    sync_state_from_topic(ntfy_topic, site_names, alert_interval, node_name, state, now)
 
     for site in sites:
         url = site["url"]
