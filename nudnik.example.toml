@@ -12,9 +12,9 @@ state_file = "/var/lib/nudnik/state.json"
 # Minimum seconds between repeated alerts for the same down site
 alert_interval_seconds = 3600
 
-# Retry a failed check this many times before treating the site as down.
+# Retry a failed check this many times before treating the site as down (default 2, max 5).
+# Delays use exponential backoff starting at 1s (1s, 2s, 4s, ...).
 # retries = 2
-# retry_delay_seconds = 10
 
 # Per-request timeout in seconds
 request_timeout_seconds = 10
