@@ -45,7 +45,11 @@ def load_config(path, _seen=None):
     base = {}
     for inc in includes:
         inc_path = Path(inc) if Path(inc).is_absolute() else path.parent / inc
-        inc_config = load_config(inc_path, _seen)
+        try:
+            inc_config = load_config(inc_path, _seen)
+        except FileNotFoundError:
+            logging.warning(f"Included config file not found, skipping: {inc_path}")
+            continue
         for k, v in inc_config.items():
             if k == "sites":
                 base.setdefault("sites", []).extend(v)

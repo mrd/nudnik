@@ -64,6 +64,15 @@ def test_load_config_include_string_form(tmp_path):
     config = nudnik.load_config(main)
     assert config["ntfy_topic"] == "t"
 
+def test_load_config_missing_include_warns_and_skips(tmp_path, caplog):
+    main = tmp_path / "main.toml"
+    main.write_text('include = ["missing.toml"]\nntfy_topic = "t"\n')
+    import logging
+    with caplog.at_level(logging.WARNING):
+        config = nudnik.load_config(main)
+    assert config["ntfy_topic"] == "t"
+    assert "missing.toml" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # fmt_duration
