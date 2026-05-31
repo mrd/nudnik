@@ -405,3 +405,84 @@ def test_main_quiet_days_suppresses_alert(monkeypatch, tmp_path):
     config = {**BASE_CONFIG, "quiet_days": [today]}
     state, notifs = _run_main(config, {}, monkeypatch, tmp_path, site_up=False)
     assert notifs == []
+
+
+def _run_main_with_check_sequence(results, monkeypatch, tmp_path, retries=2, retry_delay=0):
+    """Run main with check_site returning successive (up, reason) values from results."""
+    state_file = tmp_path / "state.json"
+    state_file.write_text("{}")
+    cfg_file = tmp_path / "nudnik.toml"
+    cfg_file.write_text(
+        f'ntfy_topic = "t"\nstate_file = "{state_file}"\n'
+        f'alert_interval_seconds = 3600\nrequest_timeout_seconds = 10\n'
+        f'retries = {retries}\nretry_delay_seconds = {retry_delay}\n'
+        f'[[sites]]\nname = "TestSite"\nurl = "http://example.com"\nkeyword = "ok"\n'
+    )
+    it = iter(results)
+    monkeypatch.setattr("nudnik.check_site", lambda *a, **kw: next(it))
+    monkeypatch.setattr("nudnik.sync_state_from_topic", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.topic_has_recent_alert", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.time.sleep", lambda s: None)
+    notifications = []
+    monkeypatch.setattr("nudnik.notify", lambda *a, **kw: notifications.append((a, kw)))
+    import sys
+    monkeypatch.setattr(sys, "argv", ["nudnik", str(cfg_file)])
+    nudnik.main()
+    return json.loads(state_file.read_text()), notifications
+
+
+def test_retry_succeeds_on_second_attempt(monkeypatch, tmp_path):
+    results = [(False, "timeout"), (True, "ok")]
+    state, notifs = _run_main_with_check_sequence(results, monkeypatch, tmp_path)
+    assert state["TestSite"]["status"] == "up"
+    assert notifs == []
+
+def test_retry_all_fail_sends_alert(monkeypatch, tmp_path):
+    results = [(False, "timeout")] * 3
+    state, notifs = _run_main_with_check_sequence(results, monkeypatch, tmp_path, retries=2)
+    assert state["TestSite"]["status"] == "down"
+    assert len(notifs) == 1
+
+def test_retry_sleeps_between_attempts(monkeypatch, tmp_path):
+    sleeps = []
+    state_file = tmp_path / "state.json"
+    state_file.write_text("{}")
+    cfg_file = tmp_path / "nudnik.toml"
+    cfg_file.write_text(
+        f'ntfy_topic = "t"\nstate_file = "{state_file}"\n'
+        f'alert_interval_seconds = 3600\nrequest_timeout_seconds = 10\n'
+        f'retries = 2\nretry_delay_seconds = 5\n'
+        f'[[sites]]\nname = "TestSite"\nurl = "http://example.com"\nkeyword = "ok"\n'
+    )
+    results = iter([(False, "timeout"), (False, "timeout"), (True, "ok")])
+    monkeypatch.setattr("nudnik.check_site", lambda *a, **kw: next(results))
+    monkeypatch.setattr("nudnik.sync_state_from_topic", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.topic_has_recent_alert", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.notify", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.time.sleep", lambda s: sleeps.append(s))
+    import sys
+    monkeypatch.setattr(sys, "argv", ["nudnik", str(cfg_file)])
+    nudnik.main()
+    assert sleeps == [5, 5]
+
+def test_no_retry_by_default(monkeypatch, tmp_path):
+    call_count = {"n": 0}
+    def counting_check(*a, **kw):
+        call_count["n"] += 1
+        return False, "timeout"
+    monkeypatch.setattr("nudnik.check_site", counting_check)
+    monkeypatch.setattr("nudnik.sync_state_from_topic", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.topic_has_recent_alert", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.notify", lambda *a, **kw: None)
+    state_file = tmp_path / "state.json"
+    state_file.write_text("{}")
+    cfg_file = tmp_path / "nudnik.toml"
+    cfg_file.write_text(
+        f'ntfy_topic = "t"\nstate_file = "{state_file}"\n'
+        f'alert_interval_seconds = 3600\nrequest_timeout_seconds = 10\n'
+        f'[[sites]]\nname = "TestSite"\nurl = "http://example.com"\nkeyword = "ok"\n'
+    )
+    import sys
+    monkeypatch.setattr(sys, "argv", ["nudnik", str(cfg_file)])
+    nudnik.main()
+    assert call_count["n"] == 1

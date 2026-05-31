@@ -234,6 +234,8 @@ def main():
     alert_interval = config.get("alert_interval_seconds", 3600)
     timeout = config.get("request_timeout_seconds", 10)
     default_ua = config.get("user_agent", DEFAULT_UA)
+    global_retries = config.get("retries", 0)
+    global_retry_delay = config.get("retry_delay_seconds", 10)
     sites = config.get("sites", [])
     global_tz = resolve_timezone(config.get("timezone"))
     global_quiet = config.get("quiet_hours")
@@ -257,6 +259,8 @@ def main():
             username, _, password = creds.partition(":")
 
         user_agent = site.get("user_agent", default_ua)
+        retries = site.get("retries", global_retries)
+        retry_delay = site.get("retry_delay_seconds", global_retry_delay)
 
         tz = resolve_timezone(site.get("timezone")) if "timezone" in site else global_tz
         site_quiet_cfg = site.get("quiet_hours", global_quiet)
@@ -267,6 +271,12 @@ def main():
         )
 
         up, reason = check_site(url, keyword, timeout, username, password, user_agent)
+        for attempt in range(retries):
+            if up:
+                break
+            logging.debug(f"{name}: attempt {attempt + 1} failed ({reason}), retrying in {retry_delay}s")
+            time.sleep(retry_delay)
+            up, reason = check_site(url, keyword, timeout, username, password, user_agent)
         site_state = state.setdefault(name, {"status": None, "last_alert": 0, "down_since": None})
         prev_status = site_state["status"]
 
