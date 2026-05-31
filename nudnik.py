@@ -114,10 +114,18 @@ def check_site(url, keyword, timeout, username=None, password=None, user_agent=D
         return False, str(e)
 
 
+def _ping_cmd(host, timeout):
+    if sys.platform == "win32":
+        return ["ping", "-n", "1", "-w", str(int(timeout * 1000)), host]
+    if sys.platform == "darwin":
+        return ["ping", "-c", "1", "-W", str(int(timeout * 1000)), host]
+    return ["ping", "-c", "1", "-W", str(int(timeout)), host]
+
+
 def check_ping(host, timeout):
     try:
         result = subprocess.run(
-            ["ping", "-c", "1", "-W", str(int(timeout)), host],
+            _ping_cmd(host, timeout),
             capture_output=True,
             timeout=timeout + 5,
         )
@@ -351,6 +359,7 @@ def main():
     parser.add_argument("config", help="Path to TOML config file")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show debug output including response headers and body excerpts")
     parser.add_argument("--check", action="store_true", help="Validate config and print resolved settings, then exit")
+    parser.add_argument("--dry-run", action="store_true", help="Run all checks but skip notifications and state saves")
     args = parser.parse_args()
 
     if args.check:
@@ -362,7 +371,7 @@ def main():
 
     log_file = config.get("log_file")
     handlers = [logging.StreamHandler()]
-    if log_file:
+    if log_file and not args.dry_run:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
         handlers.append(logging.FileHandler(log_file))
     logging.basicConfig(
@@ -447,6 +456,8 @@ def main():
                 msg = f"{name} recovered (was down for {fmt_duration(now - down_since)}).\n{target}\nReported by: {node_name}"
                 if quiet_now:
                     logging.debug(f"{name}: in quiet period, suppressing recovery notification")
+                elif args.dry_run:
+                    logging.info(f"{name}: [dry-run] would send recovery notification")
                 else:
                     notify(ntfy_topic, f"{name} is back up", msg, tags=["white_check_mark"])
                     logging.info(f"{name}: recovery notification sent")
@@ -465,16 +476,22 @@ def main():
                 msg = f"{name} is unreachable ({reason}).\nDown for: {duration}\n{target}\nReported by: {node_name}"
                 reporter = topic_has_recent_alert(ntfy_topic, name, alert_interval, node_name)
                 if reporter:
-                    site_state["last_alert"] = now
-                    site_state["last_alert_node"] = reporter
+                    if not args.dry_run:
+                        site_state["last_alert"] = now
+                        site_state["last_alert_node"] = reporter
                     logging.info(f"{name}: alert suppressed (already notified by {reporter})")
+                elif args.dry_run:
+                    logging.warning(f"{name}: [dry-run] would send alert")
                 else:
                     notify(ntfy_topic, f"{name} is down", msg, priority="high", tags=["rotating_light"])
                     site_state["last_alert"] = now
                     site_state["last_alert_node"] = node_name
                     logging.warning(f"{name}: alert sent")
 
-    save_state(state_file, state)
+    if args.dry_run:
+        logging.info("[dry-run] skipping state save")
+    else:
+        save_state(state_file, state)
 
 
 if __name__ == "__main__":
