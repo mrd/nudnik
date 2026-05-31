@@ -64,16 +64,22 @@ password = "secret"
 # retries = 0         # per-site override
 ```
 
-All `[[sites]]` fields except `url`:
+All `[[sites]]` fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `name` | no | Display name used in alerts (defaults to URL) |
+| `url` | yes (HTTP) | URL to check |
+| `host` | yes (ping) | Hostname or IP address to ping |
+| `method` | no | `"http"` (default) or `"ping"` |
+| `name` | no | Display name used in alerts (defaults to URL or host) |
 | `keyword` | no | Case-insensitive string that must appear in the response body |
 | `username` / `password` | no | HTTP Basic Auth credentials |
 | `auth_file` | no | Path to a file containing `username:password` (takes precedence over `username`/`password`) |
 | `user_agent` | no | Overrides the global `user_agent` for this site |
 | `retries` | no | Overrides the global `retries` for this site |
+| `timezone` | no | Overrides the global `timezone` for quiet-hours evaluation |
+| `quiet_hours` | no | Overrides the global `quiet_hours` for this site |
+| `quiet_days` | no | Overrides the global `quiet_days` for this site |
 
 ## Splitting config with `include`
 
@@ -131,10 +137,41 @@ To avoid duplicate alerts while still maintaining continuous coverage, stagger t
 5-59/10 * * * * /path/to/nudnik.py /path/to/nudnik.toml
 ```
 
-## Verbose mode
+## Ping monitoring
 
-Pass `-v` to see response headers and body excerpts for failing checks:
+To monitor a host by ICMP ping rather than HTTP, use `method = "ping"`:
+
+```toml
+[[sites]]
+name = "Router"
+method = "ping"
+host = "192.168.1.1"
+```
+
+The `host` field is required; `name` defaults to the host address. Timeout is controlled by the global `request_timeout_seconds`. Works on Linux, macOS, and Windows.
+
+## Flags
+
+### `-v` / `--verbose`
+
+Show response headers and body excerpts for failing checks:
 
 ```sh
 python3 nudnik.py -v nudnik.toml
+```
+
+### `--check`
+
+Validate config and print the resolved settings, then exit — no checks are run and nothing is sent:
+
+```sh
+python3 nudnik.py --check nudnik.toml
+```
+
+### `--dry-run`
+
+Run all checks but skip notifications and state saves — nothing is written to disk or sent to ntfy. Useful for testing config changes. Logs what would have been sent:
+
+```sh
+python3 nudnik.py --dry-run nudnik.toml
 ```
