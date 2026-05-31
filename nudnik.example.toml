@@ -68,3 +68,8 @@ password = "secret"
 # url = "https://api.example.com/health"
 # quiet_hours = false  # always alert, ignores global quiet_hours
 # quiet_days = false   # always alert, ignores global quiet_days
+
+# [[sites]]
+# name = "Gateway"
+# method = "ping"
+# host = "192.168.1.1"

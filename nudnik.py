@@ -6,6 +6,7 @@ import datetime
 import json
 import logging
 import socket
+import subprocess
 import sys
 import time
 import urllib.error
@@ -110,6 +111,24 @@ def check_site(url, keyword, timeout, username=None, password=None, user_agent=D
         return False, str(e.reason)
     except Exception as e:
         logging.warning(f"{url} -> {type(e).__name__}: {e}", exc_info=True)
+        return False, str(e)
+
+
+def check_ping(host, timeout):
+    try:
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", str(int(timeout)), host],
+            capture_output=True,
+            timeout=timeout + 5,
+        )
+        if result.returncode == 0:
+            return True, "ok"
+        return False, "no reply"
+    except FileNotFoundError:
+        return False, "ping command not found"
+    except subprocess.TimeoutExpired:
+        return False, "timeout"
+    except Exception as e:
         return False, str(e)
 
 
@@ -285,22 +304,30 @@ def check_config(config_path):
     lines.append(f"\nsites ({len(sites)}):")
     global_retries = min(config.get("retries", 2), 5)
     for site in sites:
-        url = site["url"]
-        name = site.get("name", url)
-        lines.append(f"\n  [{name}]")
-        lines.append(f"    url:      {url}")
-        if site.get("keyword"):
-            lines.append(f"    keyword:  {site['keyword']}")
-        if "auth_file" in site:
-            auth_path = Path(site["auth_file"])
-            if not auth_path.is_absolute() and not auth_path.exists():
-                auth_path = config_dir / auth_path
-            if auth_path.exists():
-                lines.append(f"    auth:     from {auth_path}")
-            else:
-                lines.append(f"    auth:     ERROR: file not found: {auth_path}")
-        elif site.get("username"):
-            lines.append(f"    auth:     username={site['username']}")
+        method = site.get("method", "http")
+        if method == "ping":
+            host = site.get("host", "ERROR: missing 'host'")
+            name = site.get("name", host)
+            lines.append(f"\n  [{name}]")
+            lines.append(f"    method:   ping")
+            lines.append(f"    host:     {host}")
+        else:
+            url = site["url"]
+            name = site.get("name", url)
+            lines.append(f"\n  [{name}]")
+            lines.append(f"    url:      {url}")
+            if site.get("keyword"):
+                lines.append(f"    keyword:  {site['keyword']}")
+            if "auth_file" in site:
+                auth_path = Path(site["auth_file"])
+                if not auth_path.is_absolute() and not auth_path.exists():
+                    auth_path = config_dir / auth_path
+                if auth_path.exists():
+                    lines.append(f"    auth:     from {auth_path}")
+                else:
+                    lines.append(f"    auth:     ERROR: file not found: {auth_path}")
+            elif site.get("username"):
+                lines.append(f"    auth:     username={site['username']}")
         tz = site.get("timezone", global_tz)
         if tz:
             lines.append(f"    timezone: {tz}")
@@ -366,25 +393,33 @@ def main():
     state = load_state(state_file)
     now = time.time()
 
-    site_names = [s.get("name", s["url"]) for s in sites]
+    site_names = [s.get("name", s.get("url", s.get("host", ""))) for s in sites]
     sync_state_from_topic(ntfy_topic, site_names, alert_interval, node_name, state, now)
 
     for site in sites:
-        url = site["url"]
-        name = site.get("name", url)
-        keyword = site.get("keyword", "")
-
-        username = site.get("username")
-        password = site.get("password")
-        if "auth_file" in site:
-            auth_path = Path(site["auth_file"])
-            if not auth_path.is_absolute() and not auth_path.exists():
-                auth_path = config_dir / auth_path
-            creds = auth_path.read_text().strip()
-            username, _, password = creds.partition(":")
-
-        user_agent = site.get("user_agent", default_ua)
+        method = site.get("method", "http")
         retries = min(site.get("retries", global_retries), 5)
+
+        if method == "ping":
+            host = site["host"]
+            name = site.get("name", host)
+            target = host
+            checker = lambda h=host: check_ping(h, timeout)
+        else:
+            url = site["url"]
+            name = site.get("name", url)
+            target = url
+            keyword = site.get("keyword", "")
+            username = site.get("username")
+            password = site.get("password")
+            if "auth_file" in site:
+                auth_path = Path(site["auth_file"])
+                if not auth_path.is_absolute() and not auth_path.exists():
+                    auth_path = config_dir / auth_path
+                creds = auth_path.read_text().strip()
+                username, _, password = creds.partition(":")
+            user_agent = site.get("user_agent", default_ua)
+            checker = lambda u=url, kw=keyword, un=username, pw=password, ua=user_agent: check_site(u, kw, timeout, un, pw, ua)
 
         tz = resolve_timezone(site.get("timezone")) if "timezone" in site else global_tz
         site_quiet_cfg = site.get("quiet_hours", global_quiet)
@@ -394,14 +429,14 @@ def main():
             (isinstance(site_quiet_days_cfg, list) and in_quiet_days(site_quiet_days_cfg, tz))
         )
 
-        up, reason = check_site(url, keyword, timeout, username, password, user_agent)
+        up, reason = checker()
         for attempt in range(retries):
             if up:
                 break
             delay = 2 ** attempt
             logging.debug(f"{name}: attempt {attempt + 1} failed ({reason}), retrying in {delay}s")
             time.sleep(delay)
-            up, reason = check_site(url, keyword, timeout, username, password, user_agent)
+            up, reason = checker()
         site_state = state.setdefault(name, {"status": None, "last_alert": 0, "down_since": None})
         prev_status = site_state["status"]
 
@@ -409,7 +444,7 @@ def main():
             logging.debug(f"{name}: up")
             if prev_status == "down":
                 down_since = site_state.get("down_since") or now
-                msg = f"{name} recovered (was down for {fmt_duration(now - down_since)}).\n{url}\nReported by: {node_name}"
+                msg = f"{name} recovered (was down for {fmt_duration(now - down_since)}).\n{target}\nReported by: {node_name}"
                 if quiet_now:
                     logging.debug(f"{name}: in quiet period, suppressing recovery notification")
                 else:
@@ -427,7 +462,7 @@ def main():
             elif now - last_alert >= alert_interval:
                 down_since = site_state.get("down_since") or now
                 duration = fmt_duration(now - down_since)
-                msg = f"{name} is unreachable ({reason}).\nDown for: {duration}\n{url}\nReported by: {node_name}"
+                msg = f"{name} is unreachable ({reason}).\nDown for: {duration}\n{target}\nReported by: {node_name}"
                 reporter = topic_has_recent_alert(ntfy_topic, name, alert_interval, node_name)
                 if reporter:
                     site_state["last_alert"] = now
