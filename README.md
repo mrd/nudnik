@@ -75,6 +75,40 @@ All `[[sites]]` fields except `url`:
 | `user_agent` | no | Overrides the global `user_agent` for this site |
 | `retries` | no | Overrides the global `retries` for this site |
 
+## Splitting config with `include`
+
+A config file can pull in one or more other TOML files:
+
+```toml
+include = ["base.toml", "extra-sites.toml"]
+```
+
+Included files are merged in order before the main file, so the main file's values always win. `[[sites]]` lists are concatenated (included sites first). Paths are relative to the including file, so you can keep everything in the same directory without worrying about where you invoke nudnik from.
+
+Includes can be nested — an included file can itself include others. Circular references are silently ignored.
+
+A common pattern is a shared base config for settings like `ntfy_topic` and `alert_interval_seconds`, included by several per-deployment configs that each add their own sites:
+
+```toml
+# base.toml
+ntfy_topic_file = "/run/secrets/ntfy_topic"
+alert_interval_seconds = 3600
+request_timeout_seconds = 10
+retries = 2
+```
+
+```toml
+# eindhoven.toml
+include = ["base.toml"]
+node_name = "eindhoven"
+state_file = "/var/lib/nudnik/eindhoven.json"
+
+[[sites]]
+name = "My App"
+url = "https://example.com/health"
+keyword = "ok"
+```
+
 ## Cron
 
 ```
