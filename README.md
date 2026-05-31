@@ -1,6 +1,6 @@
 # nudnik
 
-A cron-friendly website uptime monitor that sends alerts via [ntfy.sh](https://ntfy.sh).
+A cron-friendly server health monitor that sends alerts via [ntfy.sh](https://ntfy.sh).
 
 Nudnik checks each site for an HTTP 200 and an optional keyword in the response body. When a site goes down it fires an alert; when it recovers it fires a recovery notification. Repeated alerts for the same site are rate-limited so you don't get spammed.
 
@@ -125,10 +125,10 @@ retries = 2
 ```
 
 ```toml
-# eindhoven.toml
+# my_node.toml
 include = ["base.toml"]
-node_name = "eindhoven"
-state_file = "/var/lib/nudnik/eindhoven.json"
+node_name = "my_node"
+state_file = "/var/lib/nudnik/my_node.json"
 
 [[sites]]
 name = "My App"
