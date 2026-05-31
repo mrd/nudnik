@@ -174,4 +174,5 @@ Run all checks but skip notifications and state saves — nothing is written to 
 
 ```sh
 python3 nudnik.py --dry-run nudnik.toml
+python3 nudnik.py -v --dry-run nudnik.toml  # Also useful: show more output
 ```
