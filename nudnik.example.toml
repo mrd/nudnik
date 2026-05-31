@@ -11,6 +11,21 @@ alert_interval_seconds = 3600
 # Per-request timeout in seconds
 request_timeout_seconds = 10
 
+# Default timezone for interpreting quiet_hours (IANA name, e.g. "America/New_York").
+# Defaults to the system local timezone if omitted.
+# timezone = "America/New_York"
+
+# Global quiet hours: no alerts sent during this window (24-hour HH:MM, local time).
+# Can be overridden per site. Use quiet_hours = false on a site to always alert.
+# [quiet_hours]
+# start = "23:00"
+# end   = "07:00"
+
+# Global quiet days: no alerts on these days of the week.
+# Accepts full names or 3-letter abbreviations, case-insensitive.
+# Can be overridden per site. Use quiet_days = [] or quiet_days = false to always alert.
+# quiet_days = ["saturday", "sunday"]
+
 [[sites]]
 name = "My App"
 url = "https://example.com/health"
@@ -27,3 +42,15 @@ url = "https://internal.example.com/health"
 keyword = "ok"
 username = "monitor"
 password = "secret"
+
+# [[sites]]
+# name = "Tokyo App"
+# url = "https://tokyo.example.com/health"
+# timezone = "Asia/Tokyo"
+# quiet_hours = {start = "02:00", end = "08:00"}
+
+# [[sites]]
+# name = "Critical API"
+# url = "https://api.example.com/health"
+# quiet_hours = false  # always alert, ignores global quiet_hours
+# quiet_days = false   # always alert, ignores global quiet_days

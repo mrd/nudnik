@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+import datetime
 import json
 import logging
 import sys
@@ -17,6 +18,12 @@ except ImportError:
         import tomli as tomllib
     except ImportError:
         sys.exit("Python < 3.11 requires 'tomli': pip install tomli")
+
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    HAS_ZONEINFO = True
+except ImportError:
+    HAS_ZONEINFO = False
 
 
 def load_state(path):
@@ -105,6 +112,44 @@ def notify(topic, title, message, priority="default", tags=None):
         logging.warning(f"Failed to send ntfy notification: {e}")
 
 
+def resolve_timezone(tz_name):
+    if tz_name is None:
+        return None
+    if not HAS_ZONEINFO:
+        logging.warning(f"zoneinfo unavailable (Python < 3.9); ignoring timezone '{tz_name}', using local time")
+        return None
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        logging.warning(f"Unknown timezone '{tz_name}'; using local time")
+        return None
+
+
+def in_quiet_hours(quiet_hours, tz):
+    start = datetime.time(*map(int, quiet_hours["start"].split(":")))
+    end = datetime.time(*map(int, quiet_hours["end"].split(":")))
+    now = datetime.datetime.now(tz).time().replace(second=0, microsecond=0)
+    if start <= end:
+        return start <= now <= end
+    return now >= start or now <= end  # overnight window e.g. 23:00–07:00
+
+
+_DAY_NAMES = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+}
+
+
+def in_quiet_days(quiet_days, tz):
+    today = datetime.datetime.now(tz).weekday()
+    return today in {_DAY_NAMES[d.lower()] for d in quiet_days}
+
+
 def fmt_duration(seconds):
     seconds = int(seconds)
     if seconds < 60:
@@ -145,6 +190,9 @@ def main():
     timeout = config.get("request_timeout_seconds", 10)
     default_ua = config.get("user_agent", DEFAULT_UA)
     sites = config.get("sites", [])
+    global_tz = resolve_timezone(config.get("timezone"))
+    global_quiet = config.get("quiet_hours")
+    global_quiet_days = config.get("quiet_days")
 
     state = load_state(state_file)
     now = time.time()
@@ -157,6 +205,15 @@ def main():
         username = site.get("username")
         password = site.get("password")
         user_agent = site.get("user_agent", default_ua)
+
+        tz = resolve_timezone(site.get("timezone")) if "timezone" in site else global_tz
+        site_quiet_cfg = site.get("quiet_hours", global_quiet)
+        site_quiet_days_cfg = site.get("quiet_days", global_quiet_days)
+        quiet_now = (
+            (isinstance(site_quiet_cfg, dict) and in_quiet_hours(site_quiet_cfg, tz)) or
+            (isinstance(site_quiet_days_cfg, list) and in_quiet_days(site_quiet_days_cfg, tz))
+        )
+
         up, reason = check_site(url, keyword, timeout, username, password, user_agent)
         site_state = state.setdefault(name, {"status": None, "last_alert": 0, "down_since": None})
         prev_status = site_state["status"]
@@ -166,8 +223,11 @@ def main():
             if prev_status == "down":
                 down_since = site_state.get("down_since") or now
                 msg = f"{name} recovered (was down for {fmt_duration(now - down_since)}).\n{url}"
-                notify(ntfy_topic, f"{name} is back up", msg, tags=["white_check_mark"])
-                logging.info(f"{name}: recovery notification sent")
+                if quiet_now:
+                    logging.debug(f"{name}: in quiet period, suppressing recovery notification")
+                else:
+                    notify(ntfy_topic, f"{name} is back up", msg, tags=["white_check_mark"])
+                    logging.info(f"{name}: recovery notification sent")
             site_state.update(status="up", down_since=None)
         else:
             logging.warning(f"{name}: down — {reason}")
@@ -175,7 +235,9 @@ def main():
                 site_state["down_since"] = now
             site_state["status"] = "down"
             last_alert = site_state.get("last_alert", 0)
-            if now - last_alert >= alert_interval:
+            if quiet_now:
+                logging.debug(f"{name}: in quiet period, suppressing alert")
+            elif now - last_alert >= alert_interval:
                 down_since = site_state.get("down_since") or now
                 duration = fmt_duration(now - down_since)
                 msg = f"{name} is unreachable ({reason}).\nDown for: {duration}\n{url}"
