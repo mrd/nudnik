@@ -252,6 +252,10 @@ def main():
 
         username = site.get("username")
         password = site.get("password")
+        if "auth_file" in site:
+            creds = Path(site["auth_file"]).read_text().strip()
+            username, _, password = creds.partition(":")
+
         user_agent = site.get("user_agent", default_ua)
 
         tz = resolve_timezone(site.get("timezone")) if "timezone" in site else global_tz

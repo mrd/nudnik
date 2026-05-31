@@ -171,6 +171,43 @@ def test_check_site_basic_auth():
 
 
 # ---------------------------------------------------------------------------
+# auth_file
+# ---------------------------------------------------------------------------
+
+def test_main_auth_file_passes_credentials(monkeypatch, tmp_path):
+    auth_file = tmp_path / "creds"
+    auth_file.write_text("myuser:mypass\n")
+    config = {**BASE_CONFIG, "sites": [
+        {"name": "TestSite", "url": "http://example.com", "keyword": "ok",
+         "auth_file": str(auth_file)}
+    ]}
+    captured = {}
+    def fake_check_site(url, keyword, timeout, username=None, password=None, user_agent=None):
+        captured["username"] = username
+        captured["password"] = password
+        return True, "ok"
+    monkeypatch.setattr("nudnik.check_site", fake_check_site)
+    monkeypatch.setattr("nudnik.sync_state_from_topic", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.topic_has_recent_alert", lambda *a, **kw: None)
+    monkeypatch.setattr("nudnik.notify", lambda *a, **kw: None)
+
+    state_file = tmp_path / "state.json"
+    state_file.write_text("{}")
+    cfg_file = tmp_path / "nudnik.toml"
+    cfg_file.write_text(
+        f'ntfy_topic = "t"\nstate_file = "{state_file}"\n'
+        f'alert_interval_seconds = 3600\nrequest_timeout_seconds = 10\n'
+        f'[[sites]]\nname = "TestSite"\nurl = "http://example.com"\n'
+        f'keyword = "ok"\nauth_file = "{auth_file}"\n'
+    )
+    import sys
+    monkeypatch.setattr(sys, "argv", ["nudnik", str(cfg_file)])
+    nudnik.main()
+    assert captured["username"] == "myuser"
+    assert captured["password"] == "mypass"
+
+
+# ---------------------------------------------------------------------------
 # topic_has_recent_alert
 # ---------------------------------------------------------------------------
 

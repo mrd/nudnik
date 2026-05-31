@@ -48,6 +48,12 @@ username = "monitor"
 password = "secret"
 
 # [[sites]]
+# name = "Private Dashboard (auth from file)"
+# url = "https://internal.example.com/health"
+# keyword = "ok"
+# auth_file = "/run/secrets/monitor_creds"  # file contains "username:password"
+
+# [[sites]]
 # name = "Tokyo App"
 # url = "https://tokyo.example.com/health"
 # timezone = "Asia/Tokyo"
