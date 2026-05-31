@@ -23,16 +23,16 @@ request_timeout_seconds = 10
 # Defaults to the system local timezone if omitted.
 # timezone = "America/New_York"
 
+# Global quiet days: no alerts on these days of the week.
+# Accepts full names or 3-letter abbreviations, case-insensitive.
+# Can be overridden per site. Use quiet_days = [] or quiet_days = false to always alert.
+# quiet_days = ["saturday", "sunday"]
+
 # Global quiet hours: no alerts sent during this window (24-hour HH:MM, local time).
 # Can be overridden per site. Use quiet_hours = false on a site to always alert.
 # [quiet_hours]
 # start = "23:00"
 # end   = "07:00"
-
-# Global quiet days: no alerts on these days of the week.
-# Accepts full names or 3-letter abbreviations, case-insensitive.
-# Can be overridden per site. Use quiet_days = [] or quiet_days = false to always alert.
-# quiet_days = ["saturday", "sunday"]
 
 [[sites]]
 name = "My App"
