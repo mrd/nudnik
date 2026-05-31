@@ -32,6 +32,9 @@ ntfy_topic = "your-topic-here"
 log_file = "/var/log/nudnik.log"
 state_file = "/var/lib/nudnik/state.json"
 
+# Identifier included in alert messages (defaults to system hostname)
+# node_name = "prod-monitor-us-east"
+
 # Minimum seconds between repeated down-alerts for the same site (default: 3600)
 alert_interval_seconds = 3600
 
@@ -40,6 +43,10 @@ request_timeout_seconds = 10
 
 # Override the User-Agent sent with requests (default: Firefox on Linux)
 # user_agent = "..."
+
+# Retry a failed check before treating the site as down (default: 2, max: 5).
+# Delays use exponential backoff starting at 1s (1s, 2s, 4s, ...).
+# retries = 2
 
 [[sites]]
 name = "My App"
@@ -52,7 +59,9 @@ url = "https://internal.example.com/health"
 keyword = "ok"
 username = "monitor"
 password = "secret"
+# auth_file = "/run/secrets/creds"  # alternative: file containing "username:password"
 # user_agent = "..."  # per-site override
+# retries = 0         # per-site override
 ```
 
 All `[[sites]]` fields except `url`:
@@ -62,7 +71,9 @@ All `[[sites]]` fields except `url`:
 | `name` | no | Display name used in alerts (defaults to URL) |
 | `keyword` | no | Case-insensitive string that must appear in the response body |
 | `username` / `password` | no | HTTP Basic Auth credentials |
+| `auth_file` | no | Path to a file containing `username:password` (takes precedence over `username`/`password`) |
 | `user_agent` | no | Overrides the global `user_agent` for this site |
+| `retries` | no | Overrides the global `retries` for this site |
 
 ## Cron
 
@@ -72,7 +83,9 @@ All `[[sites]]` fields except `url`:
 
 ## Running on multiple machines
 
-Nudnik coordinates across instances via the ntfy topic: before sending a down-alert it polls the topic history and suppresses the notification if another instance already sent one within `alert_interval_seconds`. No shared infrastructure needed.
+Nudnik coordinates across instances via the ntfy topic. At startup it polls the topic history and updates local state based on what other nodes have reported — so a node that was offline when a site went down will immediately know about it when it comes back. Before sending a down-alert it also checks whether another node already sent one within `alert_interval_seconds` and suppresses its own if so.
+
+Each alert includes a `Reported by: <node_name>` line (hostname by default) so you can tell which machine sent it. Set `node_name` in your config if you want something more descriptive than the hostname.
 
 To avoid duplicate alerts while still maintaining continuous coverage, stagger the cron jobs across machines:
 
