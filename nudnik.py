@@ -5,6 +5,7 @@ import base64
 import datetime
 import json
 import logging
+import socket
 import sys
 import time
 import urllib.error
@@ -74,8 +75,8 @@ def check_site(url, keyword, timeout, username=None, password=None, user_agent=D
         return False, str(e)
 
 
-def topic_has_recent_alert(topic, site_name, since_seconds):
-    """Return True if another instance already sent a down-alert for site_name recently."""
+def topic_has_recent_alert(topic, site_name, since_seconds, node_name=None):
+    """Return the reporting node name if a different node sent a down-alert for site_name recently, else None."""
     url = f"https://ntfy.sh/{topic}/json?poll=1&since={int(since_seconds)}s"
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:
@@ -89,11 +90,21 @@ def topic_has_recent_alert(topic, site_name, since_seconds):
                     continue
                 if msg.get("event") != "message":
                     continue
-                if msg.get("title") == f"{site_name} is down":
-                    return True
+                if msg.get("title") != f"{site_name} is down":
+                    continue
+                body = msg.get("message", "")
+                for line in body.splitlines():
+                    if line.startswith("Reported by: "):
+                        reporter = line[len("Reported by: "):]
+                        break
+                else:
+                    reporter = "unknown"
+                if node_name and reporter == node_name:
+                    continue
+                return reporter
     except Exception as e:
         logging.debug(f"Could not poll topic for remote state: {e}")
-    return False
+    return None
 
 
 def notify(topic, title, message, priority="default", tags=None):
@@ -185,6 +196,7 @@ def main():
     else:
         sys.exit("Config must include 'ntfy_topic' or 'ntfy_topic_file'")
 
+    node_name = config.get("node_name", socket.gethostname())
     state_file = config["state_file"]
     alert_interval = config.get("alert_interval_seconds", 3600)
     timeout = config.get("request_timeout_seconds", 10)
@@ -222,7 +234,7 @@ def main():
             logging.debug(f"{name}: up")
             if prev_status == "down":
                 down_since = site_state.get("down_since") or now
-                msg = f"{name} recovered (was down for {fmt_duration(now - down_since)}).\n{url}"
+                msg = f"{name} recovered (was down for {fmt_duration(now - down_since)}).\n{url}\nReported by: {node_name}"
                 if quiet_now:
                     logging.debug(f"{name}: in quiet period, suppressing recovery notification")
                 else:
@@ -240,13 +252,16 @@ def main():
             elif now - last_alert >= alert_interval:
                 down_since = site_state.get("down_since") or now
                 duration = fmt_duration(now - down_since)
-                msg = f"{name} is unreachable ({reason}).\nDown for: {duration}\n{url}"
-                if topic_has_recent_alert(ntfy_topic, name, alert_interval):
+                msg = f"{name} is unreachable ({reason}).\nDown for: {duration}\n{url}\nReported by: {node_name}"
+                reporter = topic_has_recent_alert(ntfy_topic, name, alert_interval, node_name)
+                if reporter:
                     site_state["last_alert"] = now
-                    logging.info(f"{name}: alert suppressed (another instance already notified)")
+                    site_state["last_alert_node"] = reporter
+                    logging.info(f"{name}: alert suppressed (already notified by {reporter})")
                 else:
                     notify(ntfy_topic, f"{name} is down", msg, priority="high", tags=["rotating_light"])
                     site_state["last_alert"] = now
+                    site_state["last_alert_node"] = node_name
                     logging.warning(f"{name}: alert sent")
 
     save_state(state_file, state)

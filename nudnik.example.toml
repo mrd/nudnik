@@ -5,6 +5,10 @@ ntfy_topic = "your-topic-here"
 log_file = "/var/log/nudnik.log"
 state_file = "/var/lib/nudnik/state.json"
 
+# Node identifier included in alert messages so recipients know which instance sent the alert.
+# Defaults to the system hostname if omitted.
+# node_name = "prod-monitor-us-east"
+
 # Minimum seconds between repeated alerts for the same down site
 alert_interval_seconds = 3600
 

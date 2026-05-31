@@ -182,19 +182,29 @@ def _ndjson_response(*msgs):
     resp.__iter__ = lambda s: iter(lines.splitlines(keepends=True))
     return resp
 
-def test_topic_has_recent_alert_found():
+def test_topic_has_recent_alert_found_no_reporter():
     msg = {"event": "message", "title": "mysite is down", "message": "down"}
     with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
-        assert nudnik.topic_has_recent_alert("topic", "mysite", 3600)
+        assert nudnik.topic_has_recent_alert("topic", "mysite", 3600) == "unknown"
+
+def test_topic_has_recent_alert_found_with_reporter():
+    msg = {"event": "message", "title": "mysite is down", "message": "mysite is down\nReported by: node-b"}
+    with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
+        assert nudnik.topic_has_recent_alert("topic", "mysite", 3600) == "node-b"
+
+def test_topic_has_recent_alert_skips_own_node():
+    msg = {"event": "message", "title": "mysite is down", "message": "mysite is down\nReported by: node-a"}
+    with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
+        assert nudnik.topic_has_recent_alert("topic", "mysite", 3600, node_name="node-a") is None
 
 def test_topic_has_recent_alert_not_found():
     msg = {"event": "message", "title": "other is down", "message": "down"}
     with patch("urllib.request.urlopen", return_value=_ndjson_response(msg)):
-        assert not nudnik.topic_has_recent_alert("topic", "mysite", 3600)
+        assert nudnik.topic_has_recent_alert("topic", "mysite", 3600) is None
 
 def test_topic_has_recent_alert_network_error():
     with patch("urllib.request.urlopen", side_effect=Exception("timeout")):
-        assert not nudnik.topic_has_recent_alert("topic", "mysite", 3600)
+        assert nudnik.topic_has_recent_alert("topic", "mysite", 3600) is None
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +247,7 @@ def _run_main(config, state, monkeypatch, tmp_path,
 
     result = {"up": site_up, "reason": "ok" if site_up else "timeout"}
     monkeypatch.setattr("nudnik.check_site", lambda *a, **kw: (result["up"], result["reason"]))
-    monkeypatch.setattr("nudnik.topic_has_recent_alert", lambda *a, **kw: has_remote_alert)
+    monkeypatch.setattr("nudnik.topic_has_recent_alert", lambda *a, **kw: "remote-node" if has_remote_alert else None)
     notifications = []
     monkeypatch.setattr("nudnik.notify", lambda *a, **kw: notifications.append((a, kw)))
 
