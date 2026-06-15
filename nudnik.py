@@ -218,12 +218,12 @@ def sync_state_from_topic(topic, site_names, since_seconds, node_name, state, no
         for name in site_names:
             if title == f"{name} is down":
                 site_state = state.setdefault(name, {"status": None, "last_alert": 0, "down_since": None})
-                if site_state.get("status") != "down":
-                    site_state["status"] = "down"
-                    if site_state.get("down_since") is None:
-                        site_state["down_since"] = msg_time
-                    logging.info(f"{name}: state updated to down (reported by {reporter})")
                 if msg_time > site_state.get("last_alert", 0):
+                    if site_state.get("status") != "down":
+                        site_state["status"] = "down"
+                        if site_state.get("down_since") is None:
+                            site_state["down_since"] = msg_time
+                        logging.info(f"{name}: state updated to down (reported by {reporter})")
                     site_state["last_alert"] = msg_time
                     site_state["last_alert_node"] = reporter
             elif title == f"{name} is back up":
